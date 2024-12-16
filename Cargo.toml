@@ -1,0 +1,8 @@
+[package]
+name = "bevy-cgr-synth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.15.0"
+structopt = "0.3.25"
