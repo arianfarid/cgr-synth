@@ -2,6 +2,7 @@ use bevy::{
     app::{App}, 
     prelude::*,
 };
+use std::time::Duration;
 use rand::Rng;
 
 
@@ -9,6 +10,7 @@ fn main() {
     App::new()
     .add_plugins(DefaultPlugins)
     .init_state::<MainState>()
+    .insert_resource(SequenceTimer(Timer::from_seconds(0.2, TimerMode::Repeating)))
     .add_systems(Startup, (setup_camera, setup))
     .add_systems(Update, add_cgr)
     .run();
@@ -32,7 +34,25 @@ pub struct Point(Vec2);
 #[derive(Component)]
 pub struct Node;
 pub const NODE_COLOR: Vec3 = Vec3::new(255., 255., 0.);
-pub const NODE_COUNT: u32 = 3;
+pub const NODE_COUNT: u32 = 7;
+
+pub struct MajorScale;
+impl MajorScale {
+    const CHROMATIC_POSITIONS: [u32; 7] = [0, 2, 4, 5, 7, 9, 11];
+
+    /// Converts the major scale index (1-based) to its chromatic counterpart
+    fn to_chromatic(index: u32) -> u32 {
+        // Convert 1-based index to 0-based for the array
+        if index >= 1 && index <= 7 {
+            Self::CHROMATIC_POSITIONS[(index) as usize]
+        } else {
+            // todo octaves?
+            Self::CHROMATIC_POSITIONS[(index%7) as usize]
+            
+        }
+    }
+}
+
 fn setup
     (
         mut commands: Commands, 
@@ -50,7 +70,13 @@ fn setup
     for num in 0..node_count {
         // Calculate
         let coords = n_to_coords(num, node_count);
-        let freq = 440.0 * (2.0f32).powf(num as f32 / 12.0);
+        // Start in A. 
+        // For now we will as assume major
+        // WWHWWWH
+        // A B  C# D E F G#
+        // 0 1  2  3 4 5 6
+        let slt = MajorScale::to_chromatic(num);
+        let freq = 440.0 * (2.0f32).powf((slt) as f32 / 12.0);
         println!("{:?}, {:?}", coords, freq);
         nodes.node_vec.push(Note {xy: coords, freq});
 
@@ -78,7 +104,6 @@ fn setup
 
     //Init state to play
 
-
 }
 
 const DISTANCE_FROM_ORIGIN: f64 = 300.;
@@ -105,8 +130,11 @@ pub fn add_cgr(
     mut notes_history_query: Query<&mut NoteHistory>,
     mut main_state: Res<State<MainState>>,
     mut main_state_next: ResMut<NextState<MainState>>,
+    time: Res<Time>,
+    mut sequence_timer: ResMut<SequenceTimer>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut pitch_assets: ResMut<Assets<Pitch>>,
 ) {
     match main_state.get() {
         MainState::ReadyToAddNote => {
@@ -122,6 +150,7 @@ pub fn add_cgr(
             }
             // move xy to the fraction R_VALUE towards next_node_pointer
             new_note.xy = new_note.xy + R_VALUE * (next_node_pointer.xy - new_note.xy);
+            new_note.freq = next_node_pointer.freq;
 
             let m = meshes.add(Circle::new(2.0));
             // Render
@@ -138,11 +167,20 @@ pub fn add_cgr(
                     )
                 )
             );
+
+            commands.spawn((
+                AudioPlayer(pitch_assets.add(Pitch::new(new_note.freq, Duration::new(0, 250000000)))),
+                PlaybackSettings::DESPAWN,
+            ));
+            // commands.spawn(SequenceTimer(Timer::from_seconds(0.25, TimerMode::Once)));
             notes_history.node_vec.push(new_note);
-            // main_state_next.set(MainState::PlayingNote);
+            main_state_next.set(MainState::PlayingNote);
         },
         MainState::PlayingNote => {
             // check if timer done then move on to ready to add
+            if sequence_timer.0.tick(time.delta()).just_finished() {
+                main_state_next.set(MainState::ReadyToAddNote);
+            }
         }
     }
 }
